@@ -1,10 +1,13 @@
 package com.company.Orders.service.impl;
 
+import com.company.Orders.client.CatalogClient;
 import com.company.Orders.entity.Order;
 import com.company.Orders.events.OrderCreatedEvent;
+import com.company.Orders.exception.InsufficientStockException;
 import com.company.Orders.models.CreateOrderRequestDTO;
 import com.company.Orders.models.OrderResponseDTO;
 import com.company.Orders.models.OrderStatus;
+import com.company.Orders.models.StockCheckRequest;
 import com.company.Orders.publisher.OrderEventPublisher;
 import com.company.Orders.repository.OrderRepository;
 import com.company.Orders.service.OrderService;
@@ -21,12 +24,31 @@ public class OrderServiceImpl implements OrderService {
     //inyeccion dependencias
     private final OrderRepository orderRepository;
     //eventos rabbit
-   private final OrderEventPublisher orderEventPublisher;
+    private final OrderEventPublisher orderEventPublisher;
+    //Cliente Rest Catalogo
+    private final CatalogClient catalogClient;
+
     @Override
     @Transactional
     public OrderResponseDTO createOrder(CreateOrderRequestDTO request, Long userId) {
+
+        //validacion con Catalog
+        //Id de rastreo
+        String correlationId = UUID.randomUUID().toString();
+        //creamos el objeto para catalogo
+        StockCheckRequest stockRequest = new StockCheckRequest();
+        stockRequest.setProductId(request.getProductId());
+        stockRequest.setQuantity(request.getQuantity());
+
+        //llamada HTTp
+        Boolean hasStock = catalogClient.checkStock(stockRequest, correlationId);
+
+        //si no hay stock devolver 409
+        if (!hasStock) {
+            throw new InsufficientStockException("No hay stock suficiente para el producto" + request.getProductId());
+        }
         //guardamos en la base de datos
-        Order newOrder=Order.builder()
+        Order newOrder = Order.builder()
                 .userId(userId)
                 .productId(request.getProductId())
                 .quantity(request.getQuantity())
@@ -34,10 +56,10 @@ public class OrderServiceImpl implements OrderService {
                 .build();
 
         //guardar
-        Order savedOrder=orderRepository.save(newOrder);
+        Order savedOrder = orderRepository.save(newOrder);
 
         // Construir el evento con metodo privado
-        OrderCreatedEvent event = buildOrderCreatedEvent(savedOrder);
+        OrderCreatedEvent event = buildOrderCreatedEvent(savedOrder, correlationId);
 
         //  Publicar el evento
         orderEventPublisher.publishOrderCreated(event);
@@ -54,10 +76,16 @@ public class OrderServiceImpl implements OrderService {
     }
 
     //metodo privado para mandar la solictud
-    private OrderCreatedEvent buildOrderCreatedEvent(Order order) {
+    //
+    private OrderCreatedEvent buildOrderCreatedEvent(Order order, String correlationId) {
         OrderCreatedEvent event = new OrderCreatedEvent();
+
+        // El EventId sí es un UUID nuevo porque cada evento es único
         event.setEventId(UUID.randomUUID().toString());
-        event.setCorrelationId(UUID.randomUUID().toString());
+
+        // El CorrelationId usa el parámetro que le pasamos para mantener el rastro
+        event.setCorrelationId(correlationId);
+
         event.setOrderId(order.getId());
         event.setEstadoCompra(order.getStatus().name());
         event.setUserId(order.getUserId());
@@ -68,4 +96,5 @@ public class OrderServiceImpl implements OrderService {
 
         return event;
     }
+
 }
