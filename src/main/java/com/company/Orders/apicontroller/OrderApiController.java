@@ -26,4 +26,11 @@ public class OrderApiController implements OrderApi {
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
+
+    @Override
+    public ResponseEntity<OrderResponseDTO> cancelOrder(Long id) {
+        OrderResponseDTO response = orderService.cancelOrder(id);
+        return ResponseEntity.ok(response);
+    }
 }
+

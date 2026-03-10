@@ -2,6 +2,7 @@ package com.company.Orders.service.impl;
 
 import com.company.Orders.client.CatalogClient;
 import com.company.Orders.entity.Order;
+import com.company.Orders.events.OrderCancelledEvent;
 import com.company.Orders.events.OrderCreatedEvent;
 import com.company.Orders.exception.InsufficientStockException;
 import com.company.Orders.models.CreateOrderRequestDTO;
@@ -75,6 +76,46 @@ public class OrderServiceImpl implements OrderService {
                 .build();
     }
 
+    @Override
+    @Transactional
+    public OrderResponseDTO cancelOrder(Long orderId) {
+        //buscar la orden en la base de datos
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Orden no encontrada con ID: " + orderId));
+
+        //validar que no este ya cancelada
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            throw new RuntimeException("La orden ya fue cancelada anteriormente");
+        }
+
+        //cambiar el estado a CANCELLED
+        order.setStatus(OrderStatus.CANCELLED);
+        Order savedOrder = orderRepository.save(order);
+
+        //construir y publicar evento de cancelacion para restaurar stock
+        OrderCancelledEvent event = new OrderCancelledEvent();
+        event.setEventId(UUID.randomUUID().toString());
+        event.setCorrelationId(UUID.randomUUID().toString());
+        event.setOrderId(savedOrder.getId());
+        event.setProductId(savedOrder.getProductId());
+        event.setQuantity(savedOrder.getQuantity());
+        event.setReason("Orden cancelada por el usuario");
+        event.setCancelledAt(LocalDateTime.now());
+
+        //publicar evento a RabbitMQ
+        orderEventPublisher.publishOrderCancelled(event);
+
+        //retornar respuesta
+        return OrderResponseDTO.builder()
+                .orderId(savedOrder.getId())
+                .userId(savedOrder.getUserId())
+                .productId(savedOrder.getProductId())
+                .quantity(savedOrder.getQuantity())
+                .status(savedOrder.getStatus())
+                .message("Orden cancelada exitosamente")
+                .build();
+    }
+
     //metodo privado para mandar la solictud
     //
     private OrderCreatedEvent buildOrderCreatedEvent(Order order, String correlationId) {
@@ -98,3 +139,4 @@ public class OrderServiceImpl implements OrderService {
     }
 
 }
+

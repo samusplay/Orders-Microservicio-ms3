@@ -1,6 +1,7 @@
 package com.company.Orders.publisher.impl;
 
 import com.company.Orders.config.RabbitMQConfig;
+import com.company.Orders.events.OrderCancelledEvent;
 import com.company.Orders.events.OrderCreatedEvent;
 import com.company.Orders.publisher.OrderEventPublisher;
 import lombok.RequiredArgsConstructor;
@@ -26,4 +27,16 @@ public class OrderEventPublisherImpl implements OrderEventPublisher {
         System.out.println("Evento enviado a RabbitMQ"+event.getEventId());
 
     }
+
+    @Override
+    public void publishOrderCancelled(OrderCancelledEvent event) {
+        //envio evento de cancelacion a RabbitMQ
+        rabbitTemplate.convertAndSend(
+                RabbitMQConfig.ORDER_EXCHANGE,
+                RabbitMQConfig.ORDER_CANCELLED_ROUTING_KEY,
+                event
+        );
+        System.out.println("Evento de cancelación enviado a RabbitMQ: " + event.getEventId());
+    }
 }
+
