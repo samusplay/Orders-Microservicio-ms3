@@ -14,22 +14,29 @@ import org.springframework.web.bind.annotation.RestController;
 public class OrderApiController implements OrderApi {
     //controlador para manejar las peticiones hacia el servicio
     private final OrderService orderService;
+
     @Override
-    public ResponseEntity<OrderResponseDTO> createOrder(CreateOrderRequestDTO request) {
+    public ResponseEntity<OrderResponseDTO> createOrder(CreateOrderRequestDTO request, String userIdHeader, String correlationId) {
+        // 1. Convertimos el String a Long
+        Long realUserId = Long.valueOf(userIdHeader);
 
-        //auth prueba
-        Long mockUserId = 1L;
+        System.out.println("Creando orden para el usuario ID: " + realUserId + " | CorrelationID: " + correlationId);
 
-        //llamada al service
-        OrderResponseDTO response=orderService.createOrder(request,mockUserId);
-
+        // 2. Pasamos el ID real al Service y el correlationId
+        OrderResponseDTO response = orderService.createOrder(request, realUserId,correlationId);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @Override
-    public ResponseEntity<OrderResponseDTO> cancelOrder(Long id) {
-        OrderResponseDTO response = orderService.cancelOrder(id);
+    public ResponseEntity<OrderResponseDTO> cancelOrder(Long id, String userIdHeader, String correlationId) {
+        Long realUserId = Long.valueOf(userIdHeader);
+
+        System.out.println("Cancelando orden " + id + " para el usuario ID: " + realUserId + " | CorrelationID: " + correlationId);
+
+        // Aquí pasamos el ID de la orden. (Ojo al siguiente paso)
+        OrderResponseDTO response = orderService.cancelOrder(id, realUserId, correlationId);
+
         return ResponseEntity.ok(response);
     }
 }
