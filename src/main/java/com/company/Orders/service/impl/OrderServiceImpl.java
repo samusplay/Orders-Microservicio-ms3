@@ -2,6 +2,7 @@ package com.company.Orders.service.impl;
 
 import com.company.Orders.client.CatalogClient;
 import com.company.Orders.entity.Order;
+import com.company.Orders.entity.OrderItem;
 import com.company.Orders.events.OrderCancelledEvent;
 import com.company.Orders.events.OrderCreatedEvent;
 import com.company.Orders.exception.InsufficientStockException;
@@ -30,112 +31,121 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    public OrderResponseDTO createOrder(CreateOrderRequestDTO request, Long userId,String correlationId) {
-
-        //validacion con Catalog
-        //Id de rastreo
+    public OrderResponseDTO createOrder(CreateOrderRequestDTO request, Long userId, String correlationId) {
         if (correlationId == null) {
             correlationId = UUID.randomUUID().toString();
         }
 
-        // creamos el objeto para catalogo
-        StockCheckRequest stockRequest = new StockCheckRequest();
-        stockRequest.setProductId(request.getProductId());
-        stockRequest.setQuantity(request.getQuantity());
+        // 1. Validar stock en Catálogo para CADA producto
+        for (ItemRequestDTO item : request.getItems()) {
+            StockCheckRequest stockRequest = new StockCheckRequest();
+            stockRequest.setProductId(item.getProductId());
+            stockRequest.setQuantity(item.getQuantity());
 
-        // llamada HTTP a Catálogo con Feign (Pasando el ID de rastreo)
-        Boolean hasStock = catalogClient.checkStock(stockRequest, correlationId);
-
-        // si no hay stock devolver 409
-        if (!hasStock) {
-            throw new InsufficientStockException("No hay stock suficiente para el producto " + request.getProductId());
+            Boolean hasStock = catalogClient.checkStock(stockRequest, correlationId);
+            if (!hasStock) {
+                throw new InsufficientStockException("No hay stock suficiente para el producto ID: " + item.getProductId());
+            }
         }
 
-        // guardamos en la base de datos
+        // 2. Crear la Orden Maestra
         Order newOrder = Order.builder()
                 .userId(userId)
-                .productId(request.getProductId())
-                .quantity(request.getQuantity())
                 .status(OrderStatus.PENDING)
                 .build();
 
-        // guardar
+        // 3. Agregar los detalles (OrderItems) a la Orden
+        for (ItemRequestDTO itemRequest : request.getItems()) {
+            OrderItem item = OrderItem.builder()
+                    .productId(itemRequest.getProductId())
+                    .quantity(itemRequest.getQuantity())
+                    .build();
+            newOrder.addItem(item); // Usa el método bidireccional que creamos en la entidad
+        }
+
+        // 4. Guardar en Base de Datos
         Order savedOrder = orderRepository.save(newOrder);
 
-        // Construir el evento pasándole el Correlation ID para que viaje a RabbitMQ
-        OrderCreatedEvent event = buildOrderCreatedEvent(savedOrder, correlationId);
+        // 5. Publicar eventos en RabbitMQ (Uno por cada producto)
+        for (OrderItem item : savedOrder.getItems()) {
+            OrderCreatedEvent event = buildOrderCreatedEvent(savedOrder, item, correlationId);
+            orderEventPublisher.publishOrderCreated(event);
+        }
 
-        // Publicar el evento
-        orderEventPublisher.publishOrderCreated(event);
-
-        // retornamos respuesta
         return OrderResponseDTO.builder()
                 .orderId(savedOrder.getId())
                 .userId(savedOrder.getUserId())
-                .productId(savedOrder.getProductId())
-                .quantity(savedOrder.getQuantity())
                 .status(savedOrder.getStatus())
                 .message("Orden creada exitosamente")
+                // Mapeamos los items de Entity a DTO para la respuesta
+                .items(savedOrder.getItems().stream().map(item ->
+                        new OrderItemResponseDTO(item.getId(), item.getProductId(), item.getQuantity())
+                ).collect(Collectors.toList()))
                 .build();
     }
 
     @Override
+    @Transactional
     public OrderResponseDTO cancelOrder(Long orderId, Long userId,String correlationId) {
-        //buscar en la base de datos
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Orden no encontrada con ID: " + orderId));
 
-        //verificamos el usuario
         if (!order.getUserId().equals(userId)) {
             throw new RuntimeException("Acceso denegado: No tienes permiso para cancelar esta orden");
         }
-        //validar que ya no este cancelada
         if (order.getStatus() == OrderStatus.CANCELLED) {
             throw new RuntimeException("La orden ya fue cancelada anteriormente");
         }
-        //cambiar estado y guardar
+
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
 
-        //construimos el evento
-        OrderCancelledEvent event = new OrderCancelledEvent();
-        event.setEventId(UUID.randomUUID().toString());
+        // Publicar eventos de cancelación (Uno por cada producto para que Catálogo reponga)
+        for (OrderItem item : savedOrder.getItems()) {
+            OrderCancelledEvent event = new OrderCancelledEvent();
+            event.setEventId(UUID.randomUUID().toString());
+            event.setCorrelationId(correlationId != null ? correlationId : UUID.randomUUID().toString());
+            event.setOrderId(savedOrder.getId());
 
-        //utlizar correlationId
-        event.setCorrelationId(correlationId != null ? correlationId : UUID.randomUUID().toString());
+            // Asignamos datos del item individual
+            event.setProductId(item.getProductId());
+            event.setQuantity(item.getQuantity());
 
-        event.setOrderId(savedOrder.getId());
-        event.setProductId(savedOrder.getProductId());
-        event.setQuantity(savedOrder.getQuantity());
-        event.setReason("Orden cancelada por el usuario");
-        event.setCancelledAt(LocalDateTime.now());
+            event.setReason("Orden cancelada por el usuario");
+            event.setCancelledAt(LocalDateTime.now());
 
-        //publicamos el evento
-        orderEventPublisher.publishOrderCancelled(event);
+            orderEventPublisher.publishOrderCancelled(event);
+        }
 
-        //retornamos respuesta
         return OrderResponseDTO.builder()
                 .orderId(savedOrder.getId())
                 .userId(savedOrder.getUserId())
-                .productId(savedOrder.getProductId())
-                .quantity(savedOrder.getQuantity())
                 .status(savedOrder.getStatus())
                 .message("Orden cancelada exitosamente")
+                .items(savedOrder.getItems().stream().map(item ->
+                        new OrderItemResponseDTO(item.getId(), item.getProductId(), item.getQuantity())
+                ).collect(Collectors.toList()))
                 .build();
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<OrderResponse> getOrdersByUserId(Long userId) {
-        //buscamos en la base de datos
-        List<Order> orders=orderRepository.findByUserId(userId);
-        //traformamos de entidad a dto
+        List<Order> orders = orderRepository.findByUserId(userId);
+
         return orders.stream().map(order ->
                 OrderResponse.builder()
                         .id(order.getId())
                         .userId(order.getUserId())
-                        .productId(order.getProductId())
-                        .quantity(order.getQuantity())
                         .status(order.getStatus())
+                        // Convertimos los Entity Items a DTO Items
+                        .items(order.getItems().stream().map(item ->
+                                OrderItemResponseDTO.builder()
+                                        .id(item.getId())
+                                        .productId(item.getProductId())
+                                        .quantity(item.getQuantity())
+                                        .build()
+                        ).collect(Collectors.toList()))
                         .build()
         ).collect(Collectors.toList());
     }
@@ -143,21 +153,20 @@ public class OrderServiceImpl implements OrderService {
 
     //metodo privado para mandar la solictud
     //
-    private OrderCreatedEvent buildOrderCreatedEvent(Order order, String correlationId) {
+    private OrderCreatedEvent buildOrderCreatedEvent(Order order, OrderItem item, String correlationId) {
         OrderCreatedEvent event = new OrderCreatedEvent();
 
-        // El EventId sí es un UUID nuevo porque cada evento es único
         event.setEventId(UUID.randomUUID().toString());
-
-        // El CorrelationId usa el parámetro que le pasamos para mantener el rastro
         event.setCorrelationId(correlationId);
-
         event.setOrderId(order.getId());
         event.setEstadoCompra(order.getStatus().name());
         event.setUserId(order.getUserId());
-        event.setProductId(order.getProductId());
-        event.setQuantity(order.getQuantity());
-        event.setTotalAmount(0.0); // luego calcular precio
+
+        // Ahora saca el ID y Cantidad del ITEM, no de la Orden maestra
+        event.setProductId(item.getProductId());
+        event.setQuantity(item.getQuantity());
+
+        event.setTotalAmount(0.0);
         event.setCreatedAt(LocalDateTime.now());
 
         return event;

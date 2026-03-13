@@ -1,18 +1,21 @@
 package com.company.Orders.models;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotEmpty;
 import lombok.Data;
 import jakarta.validation.constraints.NotNull;
+
+import java.util.List;
 
 
 @Data
 public class CreateOrderRequestDTO {
 
-    @NotNull(message = "El ID del producto es obligatorio")
-    private Long productId;
+    @NotEmpty(message = "La orden debe contener al menos un producto")
+    @Valid
+    private List<ItemRequestDTO> items;
 
-    @NotNull(message = "La cantidad es obligatoria")
-    @Min(value = 1, message = "La cantidad mínima debe ser 1")
-    private Integer quantity;
+
 
 }

@@ -7,6 +7,7 @@ import com.company.Orders.models.OrderResponseDTO;
 import java.util.List;
 
 public interface OrderService {
+    //crear orden
     OrderResponseDTO createOrder(CreateOrderRequestDTO request, Long userId, String correlationId);
 
     //cancelar orden por ID
