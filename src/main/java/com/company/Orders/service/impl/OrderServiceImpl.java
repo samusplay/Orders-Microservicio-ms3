@@ -5,10 +5,7 @@ import com.company.Orders.entity.Order;
 import com.company.Orders.events.OrderCancelledEvent;
 import com.company.Orders.events.OrderCreatedEvent;
 import com.company.Orders.exception.InsufficientStockException;
-import com.company.Orders.models.CreateOrderRequestDTO;
-import com.company.Orders.models.OrderResponseDTO;
-import com.company.Orders.models.OrderStatus;
-import com.company.Orders.models.StockCheckRequest;
+import com.company.Orders.models.*;
 import com.company.Orders.publisher.OrderEventPublisher;
 import com.company.Orders.repository.OrderRepository;
 import com.company.Orders.service.OrderService;
@@ -17,7 +14,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @AllArgsConstructor
@@ -123,6 +122,22 @@ public class OrderServiceImpl implements OrderService {
                 .status(savedOrder.getStatus())
                 .message("Orden cancelada exitosamente")
                 .build();
+    }
+
+    @Override
+    public List<OrderResponse> getOrdersByUserId(Long userId) {
+        //buscamos en la base de datos
+        List<Order> orders=orderRepository.findByUserId(userId);
+        //traformamos de entidad a dto
+        return orders.stream().map(order ->
+                OrderResponse.builder()
+                        .id(order.getId())
+                        .userId(order.getUserId())
+                        .productId(order.getProductId())
+                        .quantity(order.getQuantity())
+                        .status(order.getStatus())
+                        .build()
+        ).collect(Collectors.toList());
     }
 
 

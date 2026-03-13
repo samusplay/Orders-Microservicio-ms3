@@ -1,13 +1,13 @@
 package com.company.Orders.api;
 
 import com.company.Orders.models.CreateOrderRequestDTO;
+import com.company.Orders.models.OrderResponse;
 import com.company.Orders.models.OrderResponseDTO;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 public interface OrderApi {
     //firma del Api
@@ -26,5 +26,10 @@ public interface OrderApi {
             @RequestHeader("X-User-Id") String userIdHeader,
             @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId
     );
+
+    @GetMapping("/user/{userId}")
+    ResponseEntity<List<OrderResponse>> getOrdersByUserId(
+            @PathVariable("userId") Long userId);
+
 
 }

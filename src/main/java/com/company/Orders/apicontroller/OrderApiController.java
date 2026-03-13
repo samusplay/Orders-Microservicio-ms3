@@ -2,12 +2,15 @@ package com.company.Orders.apicontroller;
 
 import com.company.Orders.api.OrderApi;
 import com.company.Orders.models.CreateOrderRequestDTO;
+import com.company.Orders.models.OrderResponse;
 import com.company.Orders.models.OrderResponseDTO;
 import com.company.Orders.service.OrderService;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @AllArgsConstructor
@@ -38,6 +41,12 @@ public class OrderApiController implements OrderApi {
         OrderResponseDTO response = orderService.cancelOrder(id, realUserId, correlationId);
 
         return ResponseEntity.ok(response);
+    }
+
+    @Override
+    public ResponseEntity<List<OrderResponse>> getOrdersByUserId(Long userId) {
+        //retornamos servicio
+        return ResponseEntity.ok(orderService.getOrdersByUserId(userId));
     }
 }
 
